@@ -1,0 +1,42 @@
+# Configurazione del trading bot EMA multi-timeframe (Bybit)
+#
+# Il bot NON invia ordini: genera solo segnali ("chiamate").
+# Un segnale LONG nasce quando, su TUTTI i time frame elencati,
+# il prezzo ha chiuso `consecutive_closes` candele di fila sopra la EMA.
+# (Se direction = short, la condizione è "sotto la EMA"; both = entrambe.)
+
+# Asset da monitorare (simboli perpetual USDT di Bybit, categoria "linear")
+symbols:
+  - BTCUSDT
+  - ETHUSDT
+  - SOLUSDT
+
+# Time frame da mettere in confluenza (minuti). Bybit interval: 1,3,5,15,30,...
+timeframes:
+  - 1
+  - 3
+  - 5
+
+# Periodo della EMA
+ema_period: 10
+
+# Quante chiusure consecutive servono (su OGNI time frame) per dare la chiamata
+consecutive_closes: 3
+
+# Direzione dei segnali: long | short | both
+direction: long
+
+# Quanti secondi tra un controllo e l'altro
+poll_seconds: 15
+
+# Leva mostrata nel testo della chiamata (puramente informativa)
+leverage: 10
+
+# Mercato Bybit: linear (USDT perp) | inverse | spot
+category: linear
+
+# Notifiche Telegram (opzionale). Lascia vuoto per usare solo la console.
+# Puoi anche usare le variabili d'ambiente TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID.
+telegram:
+  bot_token: ""
+  chat_id: ""
