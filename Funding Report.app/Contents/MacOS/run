@@ -1,24 +1,26 @@
 #!/bin/bash
-# Eseguibile dell'app "Funding Report". Doppio click -> prepara l'ambiente,
-# scarica i dati funding da Bybit, genera il report e lo apre nel browser.
-# Nessuna finestra di terminale: l'avanzamento arriva come notifiche macOS,
-# gli errori come finestrelle. Il log completo sta in funding/last-run.log.
+# Eseguibile dell'app "Funding Report".
+# Doppio click -> scarica il programma, prepara l'ambiente, scarica i dati funding
+# da Bybit, genera il report e lo apre nel browser. Nessuna finestra di terminale:
+# l'avanzamento arriva come notifiche macOS, gli errori come finestrelle.
+#
+# L'app e' AUTOSUFFICIENTE: non dipende dalla cartella in cui si trova (cosi'
+# regge la "App Translocation" di macOS). Lavora sempre in ~/FundingReport.
 
 set -u
 
-HERE="$(cd "$(dirname "$0")" && pwd)"          # .../Funding Report.app/Contents/MacOS
-ROOT="$(cd "$HERE/../../.." && pwd)"           # cartella che contiene l'app = progetto
-LOG="$ROOT/funding/last-run.log"
+BRANCH="claude/bybit-funding-analysis-5b9dtt"
+RAW="https://raw.githubusercontent.com/Sashimidimedusa/leskere/$BRANCH/funding"
+WORK="$HOME/FundingReport"
+LOG="$WORK/last-run.log"
 
-mkdir -p "$ROOT/funding" 2>/dev/null
-exec > "$LOG" 2>&1                              # tutto l'output tecnico va nel log
+mkdir -p "$WORK/funding/reports" "$WORK/funding/data" 2>/dev/null
+cd "$WORK" || { /usr/bin/osascript -e 'display dialog "Non riesco a creare ~/FundingReport." buttons {"OK"}'; exit 1; }
+exec > "$LOG" 2>&1
 echo "== Funding Report: avvio $(date) =="
-echo "ROOT=$ROOT"
 
-notify()  { /usr/bin/osascript -e "display notification \"$1\" with title \"Funding Report\"" 2>/dev/null; }
-alert()   { /usr/bin/osascript -e "display dialog \"$1\" with title \"Funding Report\" buttons {\"OK\"} default button 1 with icon caution" 2>/dev/null; }
-
-cd "$ROOT" || { alert "Non trovo la cartella del progetto."; exit 1; }
+notify() { /usr/bin/osascript -e "display notification \"$1\" with title \"Funding Report\"" 2>/dev/null; }
+alert()  { /usr/bin/osascript -e "display dialog \"$1\" with title \"Funding Report\" buttons {\"OK\"} default button 1 with icon caution" 2>/dev/null; }
 
 # 1) Python presente?
 if ! command -v python3 >/dev/null 2>&1; then
@@ -27,27 +29,35 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 1
 fi
 
-# 2) Ambiente + librerie (la prima volta richiede 1-2 minuti)
+# 2) Scarico il programma (2 file leggeri: cosi' e' sempre aggiornato)
+notify "Scarico il programma..."
+if ! curl -fsSL "$RAW/collect.py" -o funding/collect.py; then
+  alert "Non riesco a scaricare il programma. Controlla la connessione a internet e riprova."
+  exit 1
+fi
+curl -fsSL "$RAW/requirements.txt" -o funding/requirements.txt || {
+  alert "Non riesco a scaricare la lista delle librerie. Connessione internet?"; exit 1; }
+
+# 3) Ambiente + librerie (la prima volta richiede 1-2 minuti)
 notify "Preparo l'ambiente (prima volta: 1-2 min)..."
 if [ ! -x "./.venv/bin/python" ]; then
-  python3 -m venv .venv || { alert "Errore creando l'ambiente Python. Vedi funding/last-run.log"; exit 1; }
+  python3 -m venv .venv || { alert "Errore creando l'ambiente Python. Vedi ~/FundingReport/last-run.log"; exit 1; }
 fi
 ./.venv/bin/python -m pip install -q --upgrade pip
-./.venv/bin/pip install -q -r funding/requirements.txt || { alert "Errore installando le librerie. Vedi funding/last-run.log"; exit 1; }
+./.venv/bin/pip install -q -r funding/requirements.txt || { alert "Errore installando le librerie. Vedi ~/FundingReport/last-run.log"; exit 1; }
 
-# 3) Raccolta (exit!=0 per buchi/0 righe non e' fatale: il report va comunque aperto)
+# 4) Raccolta (exit!=0 per buchi/0 righe non e' fatale: apro comunque il report)
 notify "Scarico i dati funding da Bybit... attendi qualche minuto."
 ./.venv/bin/python funding/collect.py
-RC=$?
-echo "collect.py exit code: $RC"
+echo "collect.py exit code: $?"
 
-# 4) Apri il report
-REPORT="$ROOT/funding/reports/verification-latest.html"
+# 5) Apri il report
+REPORT="$WORK/funding/reports/verification-latest.html"
 if [ -f "$REPORT" ]; then
   notify "Fatto! Apro il report."
   open "$REPORT"
 else
-  alert "Raccolta terminata ma non trovo il report. Vedi funding/last-run.log"
+  alert "Raccolta terminata ma non trovo il report. Vedi ~/FundingReport/last-run.log"
   exit 1
 fi
 echo "== fine $(date) =="

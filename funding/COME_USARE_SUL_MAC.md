@@ -22,12 +22,16 @@ ti apre il report nel browser.
 - Alla fine si apre da solo il **report nel browser**: una tabella con, per ogni
   asset, righe scaricate, periodo, e eventuali problemi (buchi, prezzi mancanti).
 
+Puoi anche **trascinare l'icona dove vuoi** (Applicazioni, Scrivania): l'app è
+autosufficiente e funziona ovunque.
+
 ## Se qualcosa non va
 
 - Se dice che **manca Python**: si apre la pagina per installarlo. Installa, poi
   riapri Funding Report.
-- Per i dettagli tecnici di un errore: nella cartella del progetto, file
-  `funding/last-run.log`.
+- Per i dettagli tecnici di un errore: file `~/FundingReport/last-run.log`
+  (cartella "FundingReport" nella tua Home).
 
-> Serve connessione a internet. I dati restano sul tuo Mac (file
-> `funding/data/funding.duckdb`); non viene caricato nulla online.
+> Serve connessione a internet. L'app lavora nella cartella `~/FundingReport`: lì
+> trovi i dati (`funding/data/funding.duckdb`) e i report. Non viene caricato
+> nulla online; l'app scarica solo il programma aggiornato e i dati da Bybit.
