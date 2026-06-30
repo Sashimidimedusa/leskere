@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Funding Edge — visualizzatore</title>
+<style>
+  :root { --ok:#11772f; --okbg:#e7f7ec; --warn:#9a5b00; --warnbg:#fff4e5;
+          --bad:#b00020; --badbg:#fdecec; --line:#e5e5ea; }
+  body { font-family:-apple-system,system-ui,Segoe UI,sans-serif; color:#1d1d1f;
+         max-width:920px; margin:1.5rem auto; padding:0 1rem; line-height:1.45; }
+  h1 { font-size:1.5rem; margin-bottom:.2rem; }
+  h2 { font-size:1.15rem; margin-top:1.8rem; }
+  .sub { color:#6e6e73; font-size:.9rem; }
+  fieldset { border:1px solid var(--line); border-radius:10px; margin:1rem 0; padding:1rem; }
+  legend { padding:0 .4rem; color:#6e6e73; font-size:.85rem; }
+  label { display:inline-block; font-size:.85rem; color:#3a3a3c; margin:.25rem .6rem .25rem 0; }
+  input[type=text], input[type=number], textarea { font:inherit; padding:.35rem .5rem;
+         border:1px solid #c7c7cc; border-radius:7px; }
+  textarea { width:100%; box-sizing:border-box; }
+  input[type=number] { width:6rem; }
+  button { font:inherit; font-weight:600; padding:.55rem 1.1rem; border:0; border-radius:9px;
+           background:#0a84ff; color:#fff; cursor:pointer; }
+  button.sec { background:#e5e5ea; color:#1d1d1f; }
+  button:disabled { opacity:.5; cursor:default; }
+  table { border-collapse:collapse; width:100%; margin:.6rem 0; font-size:.92rem; }
+  th,td { border-bottom:1px solid var(--line); padding:.45rem .5rem; text-align:right; }
+  th:first-child, td:first-child { text-align:left; }
+  th { background:#f5f5f7; position:sticky; top:0; }
+  tr.warn td { background:var(--warnbg); }
+  tr.bad td { background:var(--badbg); }
+  tr.pass td { background:var(--okbg); }
+  .pill { display:inline-block; padding:.15rem .5rem; border-radius:6px; font-weight:700; font-size:.8rem; }
+  .pill.PASS { background:var(--okbg); color:var(--ok); }
+  .pill.FAIL { background:var(--badbg); color:var(--bad); }
+  .banner { padding:.7rem 1rem; border-radius:10px; margin:1rem 0; font-weight:600; }
+  .banner.ok { background:var(--okbg); color:var(--ok); }
+  .banner.warn { background:var(--warnbg); color:var(--warn); }
+  .banner.bad { background:var(--badbg); color:var(--bad); }
+  #log { font-family:ui-monospace,Menlo,monospace; font-size:.8rem; white-space:pre-wrap;
+         background:#1d1d1f; color:#e5e5ea; border-radius:10px; padding:.8rem; max-height:180px;
+         overflow:auto; margin-top:.6rem; }
+  .legend { color:#6e6e73; font-size:.82rem; margin-top:1rem; }
+  .hidden { display:none; }
+</style>
+</head>
+<body>
+<h1>Funding Edge — visualizzatore</h1>
+<p class="sub">Studio descrittivo go/no-go della strategia cash-and-carry delta-neutral
+su Bybit. Tutto gira nel tuo browser: i dati arrivano direttamente da Bybit con la
+tua connessione (niente server, niente installazione).</p>
+
+<fieldset>
+  <legend>1) Connessione</legend>
+  <button id="btnTest" class="sec">Test connessione Bybit</button>
+  <span id="testOut" class="sub"></span>
+</fieldset>
+
+<fieldset>
+  <legend>2) Cosa scaricare</legend>
+  <label>Asset (separati da spazio):</label>
+  <textarea id="symbols" rows="2">BTCUSDT ETHUSDT SOLUSDT BNBUSDT XRPUSDT ADAUSDT DOGEUSDT AVAXUSDT LINKUSDT DOTUSDT LTCUSDT ATOMUSDT NEARUSDT APTUSDT ARBUSDT</textarea>
+  <div>
+    <label>Da (data inizio): <input type="text" id="start" value="2022-01-01" size="10"></label>
+  </div>
+</fieldset>
+
+<fieldset>
+  <legend>3) Modello costi (annuo, modificabile) e criterio go/no-go</legend>
+  <label>Commissione per gamba %: <input type="number" id="fee" value="0.055" step="0.001"></label>
+  <label>Spread per gamba %: <input type="number" id="spread" value="0.02" step="0.001"></label>
+  <label>Round-trip/anno: <input type="number" id="rtpy" value="1" step="1"></label>
+  <label>Ribilanciamento %/anno: <input type="number" id="rebal" value="0.5" step="0.1"></label>
+  <br>
+  <label><b>Benchmark USDT %/anno</b> (mettilo tu, fresco): <input type="number" id="bench" value="" step="0.1" placeholder="es. 4.5"></label>
+  <label><b>Margine rischio-coda %</b>: <input type="number" id="margin" value="3" step="0.5"></label>
+  <p class="sub">Costo round-trip = 4×commissione (apri+chiudi, 2 gambe) + 2×spread.
+  Netto annuo = lordo − round-trip/anno×costo − ribilanciamento.
+  PASS se netto &gt; benchmark + margine. Lascia il benchmark vuoto per vedere solo i numeri.</p>
+</fieldset>
+
+<button id="btnRun">▶ Avvia raccolta e analisi</button>
+<button id="btnStop" class="sec hidden">Stop</button>
+<span id="prog" class="sub"></span>
+<div id="log" class="hidden"></div>
+
+<div id="results"></div>
+
+<script>
+const BASE = "https://api.bybit.com";
+const CATEGORY = "linear";
+const MS = 1000, HOUR = 3600*MS;
+let STOP = false;
+
+const $ = id => document.getElementById(id);
+function log(m){ const el=$("log"); el.classList.remove("hidden"); el.textContent += m+"\n"; el.scrollTop=el.scrollHeight; }
+const sleep = ms => new Promise(r=>setTimeout(r,ms));
+function dateToMs(s){ const [y,m,d]=s.split("-").map(Number); return Date.UTC(y,m-1,d); }
+function msToDate(ms){ return new Date(ms).toISOString().slice(0,10); }
+
+// --- HTTP con retry/backoff su 429/403/errori ---
+async function bybitGet(path, params){
+  const url = new URL(BASE+path);
+  Object.entries(params).forEach(([k,v])=>url.searchParams.set(k,v));
+  for(let attempt=0; attempt<5; attempt++){
+    try{
+      const r = await fetch(url, {headers:{"Accept":"application/json"}});
+      if(r.status===429 || r.status===403){ await sleep(1000*Math.pow(2,attempt)); continue; }
+      if(!r.ok) throw new Error("HTTP "+r.status);
+      const j = await r.json();
+      if(j.retCode!==0) throw new Error("Bybit retCode "+j.retCode+": "+j.retMsg);
+      return j.result || {};
+    }catch(e){
+      if(attempt===4) throw e;
+      await sleep(600*Math.pow(2,attempt));
+    }
+  }
+}
+
+// --- Funding history paginato all'indietro ---
+async function fetchFunding(symbol, startMs, endMs){
+  const out=[]; const seen=new Set(); let cursor=endMs;
+  while(cursor>=startMs){
+    if(STOP) throw new Error("interrotto");
+    const res = await bybitGet("/v5/market/funding/history",
+      {category:CATEGORY, symbol, startTime:startMs, endTime:cursor, limit:200});
+    const rows = (res.list||[]);
+    if(rows.length===0) break;
+    let oldest=cursor, added=0;
+    for(const r of rows){
+      const ts=Number(r.fundingRateTimestamp), rate=parseFloat(r.fundingRate);
+      oldest=Math.min(oldest,ts);
+      if(ts<startMs || seen.has(ts)) continue;
+      seen.add(ts); out.push([ts,rate]); added++;
+    }
+    const next=oldest-1;
+    if(next>=cursor || added===0) break;
+    cursor=next;
+    await sleep(140);
+  }
+  out.sort((a,b)=>a[0]-b[0]);
+  return out;
+}
+
+// --- statistiche ---
+function median(a){ if(!a.length) return NaN; const s=[...a].sort((x,y)=>x-y); const m=s.length>>1;
+  return s.length%2 ? s[m] : (s[m-1]+s[m])/2; }
+function mean(a){ return a.length ? a.reduce((s,x)=>s+x,0)/a.length : NaN; }
+function modalIntervalMs(times){ if(times.length<2) return null; const c={};
+  for(let i=1;i<times.length;i++){ const d=times[i]-times[i-1]; if(d>0) c[d]=(c[d]||0)+1; }
+  let best=null,bn=-1; for(const k in c){ if(c[k]>bn){bn=c[k];best=Number(k);} } return best; }
+
+function pct(x){ return (x*100).toFixed(2)+"%"; }
+
+function analyze(symbol, fund, costs){
+  const n=fund.length;
+  if(n===0) return {symbol, n:0};
+  const times=fund.map(r=>r[0]), rates=fund.map(r=>r[1]);
+  const iv=modalIntervalMs(times);
+  const perYear = iv ? (365*24*HOUR)/iv : 1095;     // 8h -> 1095
+  const expected = iv ? Math.floor((times[times.length-1]-times[0])/iv)+1 : n;
+  const gaps = Math.max(0, expected-n);
+  const med=median(rates), avg=mean(rates);
+  const grossMed = med*perYear, grossAvg = avg*perYear;
+  const posShare = rates.filter(r=>r>0).length/n;
+  // costo annuo
+  const rt = costs.rtpy*(4*costs.fee + 2*costs.spread)/100; // frazione/anno
+  const annualCost = rt + costs.rebal/100;
+  const netMed = grossMed - annualCost;
+  let flag=null;
+  if(costs.bench!=="" && !isNaN(costs.bench)){
+    const soglia = costs.bench/100 + costs.margin/100;
+    flag = netMed > soglia ? "PASS" : "FAIL";
+  }
+  return {symbol, n, first:msToDate(times[0]), last:msToDate(times[times.length-1]),
+          ivh: iv?Math.round(iv/HOUR):null, gaps, grossMed, grossAvg, netMed, posShare, flag};
+}
+
+// --- run ---
+async function run(){
+  STOP=false; $("results").innerHTML=""; $("log").textContent=""; $("log").classList.remove("hidden");
+  $("btnRun").disabled=true; $("btnStop").classList.remove("hidden");
+  const symbols=$("symbols").value.trim().split(/\s+/).filter(Boolean);
+  const startMs=dateToMs($("start").value.trim()), endMs=Date.now();
+  const costs={ fee:parseFloat($("fee").value), spread:parseFloat($("spread").value),
+    rtpy:parseFloat($("rtpy").value), rebal:parseFloat($("rebal").value),
+    bench:$("bench").value.trim()==="" ? "" : parseFloat($("bench").value),
+    margin:parseFloat($("margin").value) };
+  const stats=[];
+  try{
+    for(let i=0;i<symbols.length;i++){
+      if(STOP) break;
+      $("prog").textContent = `Scarico ${symbols[i]} (${i+1}/${symbols.length})...`;
+      log(`-> ${symbols[i]}: scarico funding...`);
+      const fund = await fetchFunding(symbols[i], startMs, endMs);
+      log(`   ${fund.length} righe funding`);
+      stats.push(analyze(symbols[i], fund, costs));
+    }
+    render(stats, costs);
+    $("prog").textContent = STOP ? "Interrotto." : "Fatto.";
+  }catch(e){
+    log("ERRORE: "+e.message);
+    $("prog").textContent="Errore (vedi log).";
+  }finally{
+    $("btnRun").disabled=false; $("btnStop").classList.add("hidden");
+  }
+}
+
+function render(stats, costs){
+  const anyData = stats.some(s=>s.n>0);
+  const issues = stats.filter(s=>s.n===0 || s.gaps>0);
+  let html="";
+  // banner
+  if(!anyData){ html += `<div class="banner bad">Nessun dato scaricato. Se anche il Test connessione fallisce, Bybit non permette l'accesso dal browser: usiamo il motore Python.</div>`; }
+  else if(issues.length){ html += `<div class="banner warn">Dati scaricati, ma alcuni asset hanno buchi o zero righe: controlla la colonna "buchi".</div>`; }
+  else { html += `<div class="banner ok">Dati scaricati senza buchi rilevati.</div>`; }
+
+  // tabella risultati
+  html += `<h2>Risultati funding (mediana annualizzata)</h2>`;
+  html += `<table><thead><tr><th>asset</th><th>righe</th><th>periodo</th><th>intv</th>
+    <th>buchi</th><th>lordo (med)</th><th>netto (med)</th><th>% periodi +</th><th>esito</th></tr></thead><tbody>`;
+  // ordina per netto desc
+  const ord=[...stats].sort((a,b)=>(b.netMed||-1e9)-(a.netMed||-1e9));
+  for(const s of ord){
+    if(s.n===0){ html+=`<tr class="bad"><td><b>${s.symbol}</b></td><td>0</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>`; continue; }
+    const cls = s.flag==="PASS"?"pass":(s.gaps>0?"warn":"");
+    const pill = s.flag ? `<span class="pill ${s.flag}">${s.flag}</span>` : "–";
+    html+=`<tr class="${cls}"><td>${s.symbol}</td><td>${s.n}</td>
+      <td>${s.first} → ${s.last}</td><td>${s.ivh?s.ivh+"h":"?"}</td><td>${s.gaps}</td>
+      <td>${pct(s.grossMed)}</td><td>${pct(s.netMed)}</td><td>${pct(s.posShare)}</td><td>${pill}</td></tr>`;
+  }
+  html += `</tbody></table>`;
+  html += `<p class="legend">Lordo/netto = funding mediano per periodo × periodi/anno, poi sottratti i costi.
+    La <b>mediana</b> è meno gonfiata della media. "buchi" = settlement attesi e assenti (niente dati inventati).
+    ${costs.bench===""?'Inserisci il <b>benchmark USDT</b> per vedere l\'esito PASS/FAIL.':'PASS = netto &gt; benchmark + margine.'}</p>`;
+  $("results").innerHTML = html;
+}
+
+$("btnTest").onclick = async ()=>{
+  $("testOut").textContent=" verifico...";
+  try{
+    const r = await bybitGet("/v5/market/time",{});
+    $("testOut").textContent = " ✅ Connessione OK (Bybit raggiungibile dal browser).";
+  }catch(e){
+    $("testOut").textContent = " ❌ Fallita: "+e.message+" — probabile blocco CORS. In tal caso usiamo il Python.";
+  }
+};
+$("btnRun").onclick = run;
+$("btnStop").onclick = ()=>{ STOP=true; $("prog").textContent="Interrompo..."; };
+</script>
+</body>
+</html>
