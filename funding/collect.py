@@ -84,6 +84,8 @@ RATELIMIT_RET_CODES = {10006, 10018}  # codici Bybit "too many requests"
 DEFAULT_DB_PATH = "funding/data/funding.duckdb"
 # Report leggibile (Markdown). E' committabile: lo apri da GitHub sull'iPhone.
 DEFAULT_REPORT_PATH = "funding/reports/verification-latest.md"
+# Report HTML (pagina web): si apre nel browser con un doppio click, leggibile.
+DEFAULT_HTML_PATH = "funding/reports/verification-latest.html"
 
 MS = 1000  # millisecondi per secondo
 
@@ -699,6 +701,109 @@ def write_report(text: str, path: str) -> None:
     print(f"\nReport scritto: {path}")
 
 
+def _html_escape(s: str) -> str:
+    return (s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def build_html_report(con, symbols: List[str], db_path: str,
+                      start_ms: int, end_ms: int) -> Tuple[str, bool]:
+    """Report di verifica come pagina HTML autoconsistente (si apre nel browser).
+
+    Stesso contenuto del Markdown ma formattato per essere letto a colpo d'occhio
+    sullo schermo (tabella, stato, problemi). Nessun fill silenzioso dei dati.
+    """
+    stats = [_symbol_stats(con, s) for s in symbols]
+    all_ok = all(s["rows"] > 0 for s in stats)
+    have_issues = any(
+        s["rows"] == 0 or s["gaps"] > 0 or s["no_mark"] or s["no_spot"]
+        for s in stats
+    )
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    period = (f"{datetime.utcfromtimestamp(start_ms / MS).date()} &rarr; "
+              f"{datetime.utcfromtimestamp(end_ms / MS).date()}")
+    ok_overall = all_ok and not have_issues
+    banner_txt = "OK — dati raccolti" if ok_overall else "ATTENZIONE — controlla sotto"
+    banner_cls = "ok" if ok_overall else "warn"
+
+    rows_html = []
+    for s in stats:
+        if s["rows"] == 0:
+            rows_html.append(
+                f"<tr class='bad'><td><b>{_html_escape(s['symbol'])}</b></td>"
+                "<td>0</td><td>–</td><td>–</td><td>–</td>"
+                "<td>–</td><td>–</td><td>–</td></tr>"
+            )
+            continue
+        cls = "warn" if (s["gaps"] or s["no_mark"] or s["no_spot"]) else ""
+        rows_html.append(
+            f"<tr class='{cls}'><td>{_html_escape(s['symbol'])}</td>"
+            f"<td>{s['rows']}</td><td>{s['first']}</td><td>{s['last']}</td>"
+            f"<td>{_intv_str(s)}</td><td>{s['gaps']}</td>"
+            f"<td>{s['no_mark']}</td><td>{s['no_spot']}</td></tr>"
+        )
+
+    detail = [s for s in stats if s["rows"] == 0 or s["gaps"] > 0
+              or s["no_mark"] or s["no_spot"]]
+    detail_html = ""
+    if detail:
+        items = []
+        for s in detail:
+            if s["rows"] == 0:
+                items.append(f"<li><b>{_html_escape(s['symbol'])}</b>: nessuna riga "
+                             "(rete o symbol non valido?).</li>")
+                continue
+            bits = []
+            if s["gaps"] > 0:
+                shown = ", ".join(str(d) for d in s["missing_samples"])
+                more = " …" if s["gaps"] > len(s["missing_samples"]) else ""
+                bits.append(f"{s['gaps']} buchi (primi: {_html_escape(shown)}{more})")
+            if s["no_mark"] or s["no_spot"]:
+                bits.append(f"prezzi mancanti: noMark={s['no_mark']}, noSpot={s['no_spot']}")
+            items.append(f"<li><b>{_html_escape(s['symbol'])}</b>: "
+                         + "; ".join(bits) + ".</li>")
+        detail_html = "<h2>Dettaglio problemi</h2><ul>" + "".join(items) + "</ul>"
+
+    html = f"""<!doctype html>
+<html lang="it"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Funding Edge — Report di verifica</title>
+<style>
+  body {{ font-family: -apple-system, system-ui, sans-serif; margin: 2rem auto;
+         max-width: 880px; color: #1d1d1f; padding: 0 1rem; }}
+  h1 {{ font-size: 1.5rem; }}
+  .meta {{ color: #6e6e73; font-size: .9rem; }}
+  .banner {{ padding: .8rem 1rem; border-radius: 10px; font-weight: 600;
+             margin: 1rem 0; }}
+  .banner.ok {{ background: #e7f7ec; color: #11772f; }}
+  .banner.warn {{ background: #fff4e5; color: #9a5b00; }}
+  table {{ border-collapse: collapse; width: 100%; margin: 1rem 0; font-size: .95rem; }}
+  th, td {{ border-bottom: 1px solid #e5e5ea; padding: .5rem .6rem; text-align: right; }}
+  th:first-child, td:first-child {{ text-align: left; }}
+  th {{ background: #f5f5f7; }}
+  tr.warn td {{ background: #fffaf0; }}
+  tr.bad td {{ background: #fdecec; }}
+  ul {{ line-height: 1.5; }}
+  .legend {{ color: #6e6e73; font-size: .85rem; margin-top: 1.5rem; }}
+</style></head><body>
+<h1>Funding Edge — Report di verifica raccolta</h1>
+<p class="meta">Generato: {now} · Periodo: {period} · DB locale: <code>{_html_escape(db_path)}</code></p>
+<div class="banner {banner_cls}">{banner_txt}</div>
+<table>
+  <thead><tr><th>symbol</th><th>righe</th><th>dal</th><th>al</th>
+  <th>intv</th><th>buchi</th><th>noMark</th><th>noSpot</th></tr></thead>
+  <tbody>{''.join(rows_html)}</tbody>
+</table>
+{detail_html}
+<p class="legend">
+  <b>intv</b> = intervallo di funding derivato dai dati ·
+  <b>buchi</b> = settlement attesi e assenti ·
+  <b>noMark/noSpot</b> = righe senza prezzo (restano vuote, non vengono inventate).
+</p>
+</body></html>
+"""
+    return html, all_ok
+
+
 # ---------------------------------------------------------------------------
 # MAIN
 # ---------------------------------------------------------------------------
@@ -716,9 +821,11 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     p.add_argument("--verify-only", action="store_true",
                    help="Solo asserzioni di verifica, nessun download.")
     p.add_argument("--report", default=DEFAULT_REPORT_PATH,
-                   help="Percorso del report Markdown (leggibile da iPhone via GitHub).")
+                   help="Percorso del report Markdown.")
+    p.add_argument("--html", default=DEFAULT_HTML_PATH,
+                   help="Percorso del report HTML (si apre nel browser).")
     p.add_argument("--no-report", action="store_true",
-                   help="Non scrivere il report Markdown.")
+                   help="Non scrivere i report (Markdown e HTML).")
     return p.parse_args(argv)
 
 
@@ -753,6 +860,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if not args.no_report:
         text, _ = build_markdown_report(con, args.symbols, args.db, start_ms, end_ms)
         write_report(text, args.report)
+        html, _ = build_html_report(con, args.symbols, args.db, start_ms, end_ms)
+        write_report(html, args.html)
 
     con.close()
     return 0 if ok else 1
