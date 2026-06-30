@@ -75,3 +75,28 @@ Alla fine di ogni run (o con `--verify-only`) viene stampata una tabella con,
 per ogni symbol: **righe**, **range date**, **intervallo di funding derivato**,
 **buchi** nella serie, **righe senza mark/spot**. I buchi vengono campionati ed
 elencati. Vanno valutati prima di passare ad `analyze.py`.
+
+Lo stesso contenuto viene salvato in **Markdown** in
+`funding/reports/verification-latest.md` (disattivabile con `--no-report`,
+percorso con `--report`).
+
+## Leggere il risultato dall'iPhone
+
+L'ambiente Claude Code on the web **non** raggiunge `api.bybit.com` (network
+policy), quindi la raccolta gira sul Mac. Per leggere il risultato dal telefono:
+
+```bash
+./funding/publish.sh            # esegue collect.py e PUSHA il report su GitHub
+./funding/publish.sh --verify-only
+```
+
+Lo script committa **solo** il report Markdown (il DuckDB resta locale) sul branch
+`claude/bybit-funding-analysis-5b9dtt`. Dall'iPhone:
+
+> App **GitHub** (o browser) → repo `leskere` → branch
+> `claude/bybit-funding-analysis-5b9dtt` →
+> `funding/reports/verification-latest.md`
+
+GitHub rende il Markdown anche da mobile: vedi la tabella e i problemi senza
+eseguire nulla sul telefono. Lo stesso meccanismo servira' per il report
+go/no-go di `analyze.py`.

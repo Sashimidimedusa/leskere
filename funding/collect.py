@@ -82,6 +82,8 @@ BACKOFF_BASE = 2.0          # 2s, 4s, 8s, ... su 429/418/403/errori di rete
 RATELIMIT_RET_CODES = {10006, 10018}  # codici Bybit "too many requests"
 
 DEFAULT_DB_PATH = "funding/data/funding.duckdb"
+# Report leggibile (Markdown). E' committabile: lo apri da GitHub sull'iPhone.
+DEFAULT_REPORT_PATH = "funding/reports/verification-latest.md"
 
 MS = 1000  # millisecondi per secondo
 
@@ -479,6 +481,61 @@ def _modal_interval_ms(times_ms: List[int]) -> Optional[int]:
     return max(deltas, key=deltas.get)
 
 
+def _symbol_stats(con, symbol: str) -> dict:
+    """Statistiche di verifica per un symbol (usate sia da console che report).
+
+    Calcola righe, range date, intervallo di funding derivato, buchi attesi e
+    assenti (con campione dei primi 5), e righe senza mark/spot. Nessun fill: i
+    mancanti sono solo contati e segnalati.
+    """
+    res = con.execute(
+        "SELECT funding_time, mark_price, spot_price FROM funding_history "
+        "WHERE symbol = ? ORDER BY funding_time",
+        [symbol],
+    ).fetchall()
+    n = len(res)
+    if n == 0:
+        return {"symbol": symbol, "rows": 0}
+
+    times_ms = [int(r[0].replace(tzinfo=timezone.utc).timestamp() * MS) for r in res]
+    no_mark = sum(1 for r in res if r[1] is None)
+    no_spot = sum(1 for r in res if r[2] is None)
+
+    interval_ms = _modal_interval_ms(times_ms)
+    missing_samples: List[datetime] = []
+    if interval_ms:
+        interval_h = interval_ms / 3_600_000
+        expected = (times_ms[-1] - times_ms[0]) // interval_ms + 1
+        gaps = max(0, expected - n)
+        if gaps > 0:
+            present = set(times_ms)
+            t = times_ms[0]
+            while t <= times_ms[-1] and len(missing_samples) < 5:
+                if t not in present:
+                    missing_samples.append(_ms_to_dt(t))
+                t += interval_ms
+    else:
+        interval_h = None
+        gaps = 0
+
+    return {
+        "symbol": symbol,
+        "rows": n,
+        "first": _ms_to_dt(times_ms[0]).date(),
+        "last": _ms_to_dt(times_ms[-1]).date(),
+        "interval_h": interval_h,
+        "gaps": gaps,
+        "missing_samples": missing_samples,
+        "no_mark": no_mark,
+        "no_spot": no_spot,
+    }
+
+
+def _intv_str(stats: dict) -> str:
+    h = stats.get("interval_h")
+    return f"{h:.0f}h" if h else "?"
+
+
 def verify(con, symbols: List[str]) -> bool:
     """Stampa la tabella di verifica per ogni symbol e segnala i buchi.
 
@@ -496,56 +553,25 @@ def verify(con, symbols: List[str]) -> bool:
 
     all_ok = True
     for symbol in symbols:
-        res = con.execute(
-            "SELECT funding_time, mark_price, spot_price FROM funding_history "
-            "WHERE symbol = ? ORDER BY funding_time",
-            [symbol],
-        ).fetchall()
-        n = len(res)
-        if n == 0:
+        s = _symbol_stats(con, symbol)
+        if s["rows"] == 0:
             print(f"{symbol:<11}{0:>7}{'-':>12}{'-':>12}{'-':>6}{'-':>7}{'-':>8}{'-':>8}"
                   "   << NESSUNA RIGA")
             all_ok = False
             continue
 
-        times_ms = [int(r[0].replace(tzinfo=timezone.utc).timestamp() * MS) for r in res]
-        first = _ms_to_dt(times_ms[0]).date()
-        last = _ms_to_dt(times_ms[-1]).date()
-        no_mark = sum(1 for r in res if r[1] is None)
-        no_spot = sum(1 for r in res if r[2] is None)
-
-        interval_ms = _modal_interval_ms(times_ms)
-        if interval_ms:
-            interval_h = interval_ms / 3_600_000
-            expected = (times_ms[-1] - times_ms[0]) // interval_ms + 1
-            gaps = max(0, expected - n)
-            intv_str = f"{interval_h:.0f}h"
-        else:
-            gaps = 0
-            intv_str = "?"
-
         flag = ""
-        if gaps > 0:
-            flag += f"  << {gaps} buchi nella serie"
-        if no_mark or no_spot:
-            flag += f"  << prezzi mancanti"
+        if s["gaps"] > 0:
+            flag += f"  << {s['gaps']} buchi nella serie"
+        if s["no_mark"] or s["no_spot"]:
+            flag += "  << prezzi mancanti"
 
-        print(f"{symbol:<11}{n:>7}{str(first):>12}{str(last):>12}"
-              f"{intv_str:>6}{gaps:>7}{no_mark:>8}{no_spot:>8}{flag}")
+        print(f"{symbol:<11}{s['rows']:>7}{str(s['first']):>12}{str(s['last']):>12}"
+              f"{_intv_str(s):>6}{s['gaps']:>7}{s['no_mark']:>8}{s['no_spot']:>8}{flag}")
 
-        # Dettaglio dei buchi: stampo i primi timestamp attesi e assenti.
-        if interval_ms and gaps > 0:
-            present = set(times_ms)
-            t = times_ms[0]
-            missing_samples = []
-            while t <= times_ms[-1]:
-                if t not in present:
-                    missing_samples.append(_ms_to_dt(t))
-                    if len(missing_samples) >= 5:
-                        break
-                t += interval_ms
-            shown = ", ".join(str(d) for d in missing_samples)
-            more = " ..." if gaps > len(missing_samples) else ""
+        if s["missing_samples"]:
+            shown = ", ".join(str(d) for d in s["missing_samples"])
+            more = " ..." if s["gaps"] > len(s["missing_samples"]) else ""
             print(f"            buchi (primi): {shown}{more}")
 
     print("-" * len(header))
@@ -555,6 +581,89 @@ def verify(con, symbols: List[str]) -> bool:
     if not all_ok:
         print("\n[!] Almeno un symbol non ha righe: controlla rete/allowlist/symbol.")
     return all_ok
+
+
+# ---------------------------------------------------------------------------
+# REPORT MARKDOWN (per leggere il risultato dall'iPhone via GitHub)
+# ---------------------------------------------------------------------------
+
+def build_markdown_report(con, symbols: List[str], db_path: str,
+                          start_ms: int, end_ms: int) -> Tuple[str, bool]:
+    """Costruisce il report di verifica in Markdown. (testo, all_ok).
+
+    GitHub rende il Markdown anche da mobile: committando questo file il
+    risultato e' leggibile dall'iPhone senza eseguire nulla sul telefono.
+    """
+    stats = [_symbol_stats(con, s) for s in symbols]
+    all_ok = all(s["rows"] > 0 for s in stats)
+    have_issues = any(
+        s["rows"] == 0 or s["gaps"] > 0 or s["no_mark"] or s["no_spot"]
+        for s in stats
+    )
+    now = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    period = (f"{datetime.utcfromtimestamp(start_ms / MS).date()} → "
+              f"{datetime.utcfromtimestamp(end_ms / MS).date()}")
+    status = "⚠️ ATTENZIONE" if (have_issues or not all_ok) else "✅ OK"
+
+    lines: List[str] = []
+    lines.append("# Funding Edge — Report di verifica raccolta")
+    lines.append("")
+    lines.append(f"_Generato: {now}_  ·  DB: `{db_path}`")
+    lines.append("")
+    lines.append(f"- **Symbol richiesti:** {len(symbols)}")
+    lines.append(f"- **Periodo richiesto:** {period}")
+    lines.append(f"- **Stato complessivo:** {status}")
+    lines.append("")
+    lines.append("| symbol | righe | dal | al | intv | buchi | noMark | noSpot |")
+    lines.append("|---|---:|---|---|---|---:|---:|---:|")
+    for s in stats:
+        if s["rows"] == 0:
+            lines.append(f"| **{s['symbol']}** | 0 | – | – | – | – | – | – |")
+            continue
+        lines.append(
+            f"| {s['symbol']} | {s['rows']} | {s['first']} | {s['last']} | "
+            f"{_intv_str(s)} | {s['gaps']} | {s['no_mark']} | {s['no_spot']} |"
+        )
+    lines.append("")
+
+    detail = [s for s in stats if s["rows"] == 0 or s["gaps"] > 0
+              or s["no_mark"] or s["no_spot"]]
+    if detail:
+        lines.append("## Dettaglio problemi")
+        lines.append("")
+        for s in detail:
+            if s["rows"] == 0:
+                lines.append(f"- **{s['symbol']}**: nessuna riga "
+                             "(rete/allowlist/symbol?).")
+                continue
+            bits = []
+            if s["gaps"] > 0:
+                shown = ", ".join(str(d) for d in s["missing_samples"])
+                more = " …" if s["gaps"] > len(s["missing_samples"]) else ""
+                bits.append(f"{s['gaps']} buchi (primi: {shown}{more})")
+            if s["no_mark"] or s["no_spot"]:
+                bits.append(f"prezzi mancanti: noMark={s['no_mark']}, "
+                            f"noSpot={s['no_spot']}")
+            lines.append(f"- **{s['symbol']}**: " + "; ".join(bits) + ".")
+        lines.append("")
+
+    lines.append("## Legenda")
+    lines.append("")
+    lines.append("- **intv** = intervallo di funding derivato dai dati "
+                 "(non hardcodato).")
+    lines.append("- **buchi** = settlement attesi sulla griglia e assenti.")
+    lines.append("- **noMark / noSpot** = righe senza prezzo: restano `NULL`, "
+                 "**non** vengono riempite.")
+    lines.append("")
+    return "\n".join(lines), all_ok
+
+
+def write_report(text: str, path: str) -> None:
+    import os
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(text)
+    print(f"\nReport scritto: {path}")
 
 
 # ---------------------------------------------------------------------------
@@ -573,6 +682,10 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
                    help="Tenta anche l'open interest (best-effort, retention corta).")
     p.add_argument("--verify-only", action="store_true",
                    help="Solo asserzioni di verifica, nessun download.")
+    p.add_argument("--report", default=DEFAULT_REPORT_PATH,
+                   help="Percorso del report Markdown (leggibile da iPhone via GitHub).")
+    p.add_argument("--no-report", action="store_true",
+                   help="Non scrivere il report Markdown.")
     return p.parse_args(argv)
 
 
@@ -597,6 +710,11 @@ def main(argv: Optional[List[str]] = None) -> int:
                 print(f"  [!] {symbol}: errore di raccolta: {exc}", file=sys.stderr)
 
     ok = verify(con, args.symbols)
+
+    if not args.no_report:
+        text, _ = build_markdown_report(con, args.symbols, args.db, start_ms, end_ms)
+        write_report(text, args.report)
+
     con.close()
     return 0 if ok else 1
 
