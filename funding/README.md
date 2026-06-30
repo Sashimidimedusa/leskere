@@ -80,23 +80,24 @@ Lo stesso contenuto viene salvato in **Markdown** in
 `funding/reports/verification-latest.md` (disattivabile con `--no-report`,
 percorso con `--report`).
 
-## Leggere il risultato dall'iPhone
+## Lanciare e leggere dal telefono
 
-L'ambiente Claude Code on the web **non** raggiunge `api.bybit.com` (network
-policy), quindi la raccolta gira sul Mac. Per leggere il risultato dal telefono:
+Bybit blocca gli IP cloud (verificato: i runner GitHub ospitati danno 0 righe),
+quindi la raccolta deve girare su una macchina non bloccata: **il tuo Mac**.
 
+### Opzione consigliata: pulsante su GitHub → eseguito sul Mac
+Registra il Mac come *self-hosted runner* (una volta): poi premi **Run workflow**
+dall'app GitHub e il job gira sul Mac e committa il report.
+Setup: vedi **`funding/SELF_HOSTED_RUNNER.md`**.
+
+> App **GitHub** → **Actions** → **Funding report (Bybit)** → **Run workflow**
+> poi leggi `funding/reports/verification-latest.md`
+
+### Alternativa senza runner: un comando sul Mac
 ```bash
 ./funding/publish.sh            # esegue collect.py e PUSHA il report su GitHub
 ./funding/publish.sh --verify-only
 ```
-
-Lo script committa **solo** il report Markdown (il DuckDB resta locale) sul branch
-`claude/bybit-funding-analysis-5b9dtt`. Dall'iPhone:
-
-> App **GitHub** (o browser) → repo `leskere` → branch
-> `claude/bybit-funding-analysis-5b9dtt` →
-> `funding/reports/verification-latest.md`
-
-GitHub rende il Markdown anche da mobile: vedi la tabella e i problemi senza
-eseguire nulla sul telefono. Lo stesso meccanismo servira' per il report
-go/no-go di `analyze.py`.
+Committa **solo** il report Markdown (il DuckDB resta locale). Lo leggi dallo
+stesso file su GitHub. Lo stesso meccanismo servira' per il report go/no-go di
+`analyze.py`.
