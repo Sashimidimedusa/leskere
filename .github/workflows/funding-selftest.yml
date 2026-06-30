@@ -7,7 +7,7 @@ name: Funding selftest (temporaneo)
 on:
   push:
     branches: [claude/bybit-funding-analysis-5b9dtt]
-    paths: ['.github/workflows/funding-selftest.yml']
+    paths: ['.github/workflows/funding-selftest.yml', 'funding/**']
 
 permissions:
   contents: write

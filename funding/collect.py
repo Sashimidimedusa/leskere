@@ -336,6 +336,12 @@ def fetch_open_interest(
 # ---------------------------------------------------------------------------
 
 def connect(db_path: str) -> "duckdb.DuckDBPyConnection":
+    # DuckDB non crea la cartella padre: la creo io (funding/data/ e' gitignored,
+    # quindi su un checkout pulito non esiste — vale per Actions e per il Mac).
+    import os
+    parent = os.path.dirname(db_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
     con = duckdb.connect(db_path)
     ensure_schema(con)
     return con
