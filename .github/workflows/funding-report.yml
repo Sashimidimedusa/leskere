@@ -1,0 +1,87 @@
+name: Funding report (Bybit)
+
+# Genera il report di verifica della raccolta funding e lo committa nel repo,
+# cosi' lo apri da GitHub anche dall'iPhone (app GitHub > Actions per lanciarlo,
+# poi il file funding/reports/verification-latest.md per leggerlo).
+#
+# IMPORTANTE: perche' il pulsante "Run workflow" e lo schedule funzionino, questo
+# file deve trovarsi sul BRANCH DI DEFAULT del repo. La raccolta viene comunque
+# eseguita e il report committato sul branch di lavoro (REPORT_BRANCH).
+#
+# NOTA geo-block: i runner GitHub stanno spesso in USA e Bybit blocca gli IP USA.
+# In quel caso collect.py lo rileva (preflight) e il report risultera' vuoto: e'
+# un segnale onesto, non dati finti. Fallback affidabile: ./funding/publish.sh sul Mac.
+
+on:
+  workflow_dispatch:
+    inputs:
+      symbols:
+        description: "Symbol separati da spazio (vuoto = universo di default)"
+        required: false
+        default: ""
+      start:
+        description: "Data inizio YYYY-MM-DD"
+        required: false
+        default: "2022-01-01"
+      end:
+        description: "Data fine YYYY-MM-DD (vuoto = adesso)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 6 * * 1"   # ogni lunedi' 06:17 UTC (modificabile)
+
+concurrency:
+  group: funding-report
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  REPORT_BRANCH: claude/bybit-funding-analysis-5b9dtt
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch di lavoro
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.REPORT_BRANCH }}
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Cache DuckDB (raccolta incrementale tra run)
+        uses: actions/cache@v4
+        with:
+          path: funding/data
+          key: funding-duckdb
+
+      - name: Installa dipendenze
+        run: pip install -r funding/requirements.txt
+
+      - name: Raccolta + verifica + report
+        run: |
+          ARGS=""
+          if [ -n "${{ inputs.start }}" ];   then ARGS="$ARGS --start ${{ inputs.start }}"; fi
+          if [ -n "${{ inputs.end }}" ];     then ARGS="$ARGS --end ${{ inputs.end }}"; fi
+          if [ -n "${{ inputs.symbols }}" ]; then ARGS="$ARGS --symbols ${{ inputs.symbols }}"; fi
+          echo "collect.py $ARGS"
+          # exit!=0 (es. buchi o host bloccato) NON deve fermare la pubblicazione
+          python funding/collect.py $ARGS || true
+
+      - name: Committa il report sul branch di lavoro
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add funding/reports/verification-latest.md
+          if git diff --cached --quiet; then
+            echo "Nessuna modifica al report: niente da committare."
+          else
+            git commit -m "Report verifica funding (Actions, $(date -u '+%Y-%m-%d %H:%M UTC'))"
+            git push origin HEAD:${{ env.REPORT_BRANCH }}
+          fi

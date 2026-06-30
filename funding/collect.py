@@ -170,6 +170,33 @@ def _backoff(attempt: int, reason: str) -> None:
     time.sleep(wait)
 
 
+def preflight(session: requests.Session) -> bool:
+    """Verifica veloce che Bybit sia raggiungibile da QUESTO host.
+
+    Serve a fallire in fretta e in chiaro quando l'host e' geo-bloccato (i runner
+    GitHub Actions stanno spesso in USA e Bybit blocca gli IP USA con un 403):
+    senza questo check ogni symbol andrebbe in retry per minuti prima di arrendersi.
+    Restituisce True se l'endpoint /v5/market/time risponde correttamente.
+    """
+    url = f"{BASE_URL}/v5/market/time"
+    for attempt in range(2):
+        try:
+            r = session.get(url, timeout=10)
+            if r.status_code == 200 and (r.json().get("retCode") == 0):
+                return True
+            if r.status_code == 403:
+                print("[preflight] HTTP 403 da Bybit: host probabilmente "
+                      "geo-bloccato (es. runner USA). Niente raccolta.",
+                      file=sys.stderr)
+                return False
+            print(f"[preflight] risposta inattesa: HTTP {r.status_code}",
+                  file=sys.stderr)
+        except requests.RequestException as exc:
+            print(f"[preflight] Bybit non raggiungibile: {exc}", file=sys.stderr)
+        time.sleep(2)
+    return False
+
+
 # ---------------------------------------------------------------------------
 # FETCH: funding history (paginato all'indietro su tutto il range)
 # ---------------------------------------------------------------------------
@@ -700,14 +727,20 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if not args.verify_only:
         session = requests.Session()
-        print(f"Raccolta {len(args.symbols)} symbol, "
-              f"{datetime.utcfromtimestamp(start_ms / MS).date()} -> "
-              f"{datetime.utcfromtimestamp(end_ms / MS).date()}, db={args.db}")
-        for symbol in args.symbols:
-            try:
-                collect_symbol(con, session, symbol, start_ms, end_ms, args.with_oi)
-            except BybitError as exc:
-                print(f"  [!] {symbol}: errore di raccolta: {exc}", file=sys.stderr)
+        if not preflight(session):
+            print("\n[!] Bybit non raggiungibile da questo host: salto la raccolta.\n"
+                  "    (In GitHub Actions e' tipicamente un geo-block USA: usa il\n"
+                  "    Mac con ./funding/publish.sh.) Genero comunque il report sullo\n"
+                  "    stato attuale del DB.", file=sys.stderr)
+        else:
+            print(f"Raccolta {len(args.symbols)} symbol, "
+                  f"{datetime.utcfromtimestamp(start_ms / MS).date()} -> "
+                  f"{datetime.utcfromtimestamp(end_ms / MS).date()}, db={args.db}")
+            for symbol in args.symbols:
+                try:
+                    collect_symbol(con, session, symbol, start_ms, end_ms, args.with_oi)
+                except BybitError as exc:
+                    print(f"  [!] {symbol}: errore di raccolta: {exc}", file=sys.stderr)
 
     ok = verify(con, args.symbols)
 
