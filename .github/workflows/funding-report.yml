@@ -1,20 +1,15 @@
 name: Funding report (Bybit)
 
-# Genera il report di verifica della raccolta funding e lo committa nel repo,
-# cosi' lo apri da GitHub anche dall'iPhone (app GitHub > Actions per lanciarlo,
-# poi il file funding/reports/verification-latest.md per leggerlo).
+# Lancia la raccolta funding e committa il report, cosi' lo apri da GitHub anche
+# dall'iPhone (app GitHub > Actions > Run workflow per lanciare; poi il file
+# funding/reports/verification-latest.md per leggere).
 #
-# IMPORTANTE: perche' il pulsante "Run workflow" e lo schedule funzionino, questo
-# file deve trovarsi sul BRANCH DI DEFAULT del repo. La raccolta viene comunque
-# eseguita e il report committato sul branch di lavoro (REPORT_BRANCH).
+# Gira su un SELF-HOSTED RUNNER (il tuo Mac): i runner cloud GitHub sono
+# geo-bloccati da Bybit, il Mac no. Vedi funding/SELF_HOSTED_RUNNER.md per il
+# setup una-tantum (poi il runner gira come servizio: premi il pulsante e basta).
 #
-# GEO-BLOCK (VERIFICATO): i runner GitHub ospitati (Azure USA) NON raggiungono
-# Bybit -> un self-test ha prodotto 0 righe. Quindi su runner cloud il report
-# esce vuoto (segnale onesto via preflight, non dati finti). Per dati REALI:
-#   - registra un self-hosted runner sul tuo Mac e metti `runs-on: [self-hosted]`
-#     (il Mac raggiunge Bybit) -> lanci dal telefono e ottieni dati veri; oppure
-#   - usa ./funding/publish.sh sul Mac (nessun runner, un comando).
-# Lo schedule e' stato rimosso apposta: nel cloud non puo' funzionare.
+# IMPORTANTE: perche' il pulsante "Run workflow" compaia, questo file deve stare
+# sul BRANCH DI DEFAULT del repo. Il report viene committato su REPORT_BRANCH.
 
 on:
   workflow_dispatch:
@@ -44,27 +39,20 @@ env:
 
 jobs:
   report:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted   # il tuo Mac (vedi funding/SELF_HOSTED_RUNNER.md)
     steps:
       - name: Checkout branch di lavoro
         uses: actions/checkout@v4
         with:
           ref: ${{ env.REPORT_BRANCH }}
           fetch-depth: 0
+          clean: false   # preserva il DuckDB locale (funding/data/) tra i run
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Cache DuckDB (raccolta incrementale tra run)
-        uses: actions/cache@v4
-        with:
-          path: funding/data
-          key: funding-duckdb
-
-      - name: Installa dipendenze
-        run: pip install -r funding/requirements.txt
+      - name: Prepara ambiente Python (venv) + dipendenze
+        run: |
+          python3 -m venv .venv
+          ./.venv/bin/python -m pip install -q --upgrade pip
+          ./.venv/bin/pip install -q -r funding/requirements.txt
 
       - name: Raccolta + verifica + report
         run: |
@@ -73,8 +61,8 @@ jobs:
           if [ -n "${{ inputs.end }}" ];     then ARGS="$ARGS --end ${{ inputs.end }}"; fi
           if [ -n "${{ inputs.symbols }}" ]; then ARGS="$ARGS --symbols ${{ inputs.symbols }}"; fi
           echo "collect.py $ARGS"
-          # exit!=0 (es. buchi o host bloccato) NON deve fermare la pubblicazione
-          python funding/collect.py $ARGS || true
+          # exit!=0 (es. buchi) NON deve fermare la pubblicazione del report
+          ./.venv/bin/python funding/collect.py $ARGS || true
 
       - name: Committa il report sul branch di lavoro
         run: |
