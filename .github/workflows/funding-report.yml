@@ -8,9 +8,13 @@ name: Funding report (Bybit)
 # file deve trovarsi sul BRANCH DI DEFAULT del repo. La raccolta viene comunque
 # eseguita e il report committato sul branch di lavoro (REPORT_BRANCH).
 #
-# NOTA geo-block: i runner GitHub stanno spesso in USA e Bybit blocca gli IP USA.
-# In quel caso collect.py lo rileva (preflight) e il report risultera' vuoto: e'
-# un segnale onesto, non dati finti. Fallback affidabile: ./funding/publish.sh sul Mac.
+# GEO-BLOCK (VERIFICATO): i runner GitHub ospitati (Azure USA) NON raggiungono
+# Bybit -> un self-test ha prodotto 0 righe. Quindi su runner cloud il report
+# esce vuoto (segnale onesto via preflight, non dati finti). Per dati REALI:
+#   - registra un self-hosted runner sul tuo Mac e metti `runs-on: [self-hosted]`
+#     (il Mac raggiunge Bybit) -> lanci dal telefono e ottieni dati veri; oppure
+#   - usa ./funding/publish.sh sul Mac (nessun runner, un comando).
+# Lo schedule e' stato rimosso apposta: nel cloud non puo' funzionare.
 
 on:
   workflow_dispatch:
@@ -27,8 +31,6 @@ on:
         description: "Data fine YYYY-MM-DD (vuoto = adesso)"
         required: false
         default: ""
-  schedule:
-    - cron: "17 6 * * 1"   # ogni lunedi' 06:17 UTC (modificabile)
 
 concurrency:
   group: funding-report
