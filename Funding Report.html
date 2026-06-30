@@ -162,18 +162,25 @@ function analyze(symbol, fund, costs){
   const gaps = Math.max(0, expected-n);
   const med=median(rates), avg=mean(rates);
   const grossMed = med*perYear, grossAvg = avg*perYear;
+  const negs = rates.filter(r=>r<0);
   const posShare = rates.filter(r=>r>0).length/n;
+  const negShare = negs.length/n;
+  const minRate = Math.min(...rates);            // peggior singolo periodo
+  const negAvg = negs.length ? mean(negs) : 0;   // funding medio quando e' negativo
   // costo annuo
   const rt = costs.rtpy*(4*costs.fee + 2*costs.spread)/100; // frazione/anno
   const annualCost = rt + costs.rebal/100;
   const netMed = grossMed - annualCost;
+  const netAvg = grossAvg - annualCost;          // realizzato netto
   let flag=null;
   if(costs.bench!=="" && !isNaN(costs.bench)){
     const soglia = costs.bench/100 + costs.margin/100;
-    flag = netMed > soglia ? "PASS" : "FAIL";
+    // criterio prudente: deve passare il PEGGIORE tra mediano e medio realizzato
+    flag = Math.min(netMed, netAvg) > soglia ? "PASS" : "FAIL";
   }
   return {symbol, n, first:msToDate(times[0]), last:msToDate(times[times.length-1]),
-          ivh: iv?Math.round(iv/HOUR):null, gaps, grossMed, grossAvg, netMed, posShare, flag};
+          ivh: iv?Math.round(iv/HOUR):null, gaps, grossMed, grossAvg, netMed, netAvg,
+          posShare, negShare, minRate, negAvg, flag};
 }
 
 // --- run ---
@@ -216,23 +223,33 @@ function render(stats, costs){
   else { html += `<div class="banner ok">Dati scaricati senza buchi rilevati.</div>`; }
 
   // tabella risultati
-  html += `<h2>Risultati funding (mediana annualizzata)</h2>`;
-  html += `<table><thead><tr><th>asset</th><th>righe</th><th>periodo</th><th>intv</th>
-    <th>buchi</th><th>lordo (med)</th><th>netto (med)</th><th>% periodi +</th><th>esito</th></tr></thead><tbody>`;
-  // ordina per netto desc
-  const ord=[...stats].sort((a,b)=>(b.netMed||-1e9)-(a.netMed||-1e9));
+  html += `<h2>Risultati funding annualizzato</h2>`;
+  html += `<table><thead><tr><th>asset</th><th>righe</th><th>periodo</th>
+    <th>buchi</th><th>netto mediano</th><th>netto medio<br>(realizzato)</th>
+    <th>% periodi +</th><th>% periodi −</th><th>funding peggiore<br>(1 periodo)</th>
+    <th>esito</th></tr></thead><tbody>`;
+  // ordina per netto medio (realizzato) desc
+  const ord=[...stats].sort((a,b)=>(b.netAvg||-1e9)-(a.netAvg||-1e9));
   for(const s of ord){
-    if(s.n===0){ html+=`<tr class="bad"><td><b>${s.symbol}</b></td><td>0</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>`; continue; }
-    const cls = s.flag==="PASS"?"pass":(s.gaps>0?"warn":"");
+    if(s.n===0){ html+=`<tr class="bad"><td><b>${s.symbol}</b></td><td>0</td><td colspan="8">nessun dato</td></tr>`; continue; }
+    const cls = s.flag==="PASS"?"pass":(s.flag==="FAIL"?"bad":(s.gaps>0?"warn":""));
     const pill = s.flag ? `<span class="pill ${s.flag}">${s.flag}</span>` : "–";
     html+=`<tr class="${cls}"><td>${s.symbol}</td><td>${s.n}</td>
-      <td>${s.first} → ${s.last}</td><td>${s.ivh?s.ivh+"h":"?"}</td><td>${s.gaps}</td>
-      <td>${pct(s.grossMed)}</td><td>${pct(s.netMed)}</td><td>${pct(s.posShare)}</td><td>${pill}</td></tr>`;
+      <td>${s.first} → ${s.last}</td><td>${s.gaps}</td>
+      <td>${pct(s.netMed)}</td><td><b>${pct(s.netAvg)}</b></td>
+      <td>${pct(s.posShare)}</td><td>${pct(s.negShare)}</td>
+      <td>${(s.minRate*100).toFixed(3)}%</td><td>${pill}</td></tr>`;
   }
   html += `</tbody></table>`;
-  html += `<p class="legend">Lordo/netto = funding mediano per periodo × periodi/anno, poi sottratti i costi.
-    La <b>mediana</b> è meno gonfiata della media. "buchi" = settlement attesi e assenti (niente dati inventati).
-    ${costs.bench===""?'Inserisci il <b>benchmark USDT</b> per vedere l\'esito PASS/FAIL.':'PASS = netto &gt; benchmark + margine.'}</p>`;
+  html += `<p class="legend">
+    <b>netto mediano</b> = funding <i>tipico</i> (robusto, ma per molti alt cade sul default
+    Bybit di 0,01%/8h ≈ 10,95%/anno, quindi da solo illude).
+    <b>netto medio (realizzato)</b> = quanto incassi davvero in media (somma dei funding / tempo); è
+    sensibile agli spike ma è il rendimento vero. <b>% periodi −</b> e <b>funding peggiore</b> dicono
+    quanto spesso e quanto profondamente <i>paghi</i> (tipicamente nei crash, dove il delta-neutral
+    soffre di più). Costi sottratti: 4×commissione + 2×spread per round-trip + ribilanciamento.
+    ${costs.bench===""?'Inserisci il <b>benchmark USDT</b> per l\'esito PASS/FAIL.':'PASS = min(netto mediano, netto medio) &gt; benchmark + margine.'}
+    <br><b>Manca ancora</b>: basis risk e drawdown del delta-neutral (richiede di scaricare anche i prezzi).</p>`;
   $("results").innerHTML = html;
 }
 
