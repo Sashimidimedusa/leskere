@@ -4,3 +4,6 @@ __pycache__/
 venv/
 .venv/
 *.log
+
+# Dati locali dello scanner (database segnali e cache storico backtest)
+scanner/data/

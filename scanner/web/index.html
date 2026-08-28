@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Scanner intraday · Bybit</title>
+<style>
+  :root{
+    --bg:#0b0e14; --panel:#131823; --panel-2:#1a2030; --line:#242c3d;
+    --txt:#e6ebf5; --muted:#8590a8; --long:#22c55e; --short:#ef4444;
+    --accent:#3b82f6; --warn:#f59e0b;
+    --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       -webkit-text-size-adjust:100%}
+  header{position:sticky;top:0;z-index:10;background:rgba(11,14,20,.94);
+         backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+         padding:10px 14px calc(10px + env(safe-area-inset-bottom,0))}
+  .bar{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+  h1{margin:0;font-size:15px;letter-spacing:.14em;text-transform:uppercase;font-weight:700}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--long);
+       box-shadow:0 0 8px var(--long);animation:pulse 2s infinite}
+  .dot.stale{background:var(--warn);box-shadow:0 0 8px var(--warn);animation:none}
+  .dot.err{background:var(--short);box-shadow:0 0 8px var(--short);animation:none}
+  @keyframes pulse{50%{opacity:.35}}
+  .stats{display:flex;gap:16px;flex-wrap:wrap;margin-left:auto;font-family:var(--mono);font-size:12px}
+  .stat b{display:block;color:var(--muted);font-weight:500;font-size:10px;
+          letter-spacing:.08em;text-transform:uppercase}
+  nav{display:flex;gap:6px;margin-top:10px}
+  nav button{background:var(--panel);border:1px solid var(--line);color:var(--muted);
+             padding:6px 14px;border-radius:7px;cursor:pointer;font-size:13px}
+  nav button.on{background:var(--panel-2);color:var(--txt);border-color:var(--accent)}
+  main{padding:14px;max-width:1500px;margin:0 auto}
+  .banner{background:#3a1d1d;border:1px solid #7f2d2d;color:#ffd9d9;
+          padding:12px 14px;border-radius:9px;margin-bottom:14px;font-size:13px}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
+  thead th{position:sticky;top:0;background:var(--panel);color:var(--muted);text-align:right;
+           font-weight:500;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
+           padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+  thead th:first-child,thead th.l{text-align:left}
+  tbody td{padding:9px 8px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  tbody td.l{text-align:left}
+  tbody tr.row{cursor:pointer}
+  tbody tr.row:hover{background:var(--panel)}
+  .sym{font-weight:700;font-size:13.5px;letter-spacing:.02em}
+  .badge{display:inline-block;padding:2px 8px;border-radius:5px;font-size:10.5px;
+         font-weight:700;letter-spacing:.06em}
+  .badge.long{background:rgba(34,197,94,.16);color:var(--long)}
+  .badge.short{background:rgba(239,68,68,.16);color:var(--short)}
+  .scorewrap{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+  .scorebar{width:56px;height:5px;background:var(--panel-2);border-radius:3px;overflow:hidden}
+  .scorebar i{display:block;height:100%;border-radius:3px}
+  .score{font-weight:700;min-width:30px;text-align:right}
+  .pos{color:var(--long)} .neg{color:var(--short)} .mut{color:var(--muted)}
+  .hot{color:var(--warn);font-weight:700}
+  .detail td{background:var(--panel);padding:14px 16px;text-align:left;white-space:normal}
+  .why{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:12px}
+  .why span{background:var(--panel-2);border:1px solid var(--line);border-radius:14px;
+            padding:4px 11px;font-size:11.5px}
+  .why span.w{border-color:#5a4415;background:#2a2210;color:#f5c877}
+  .comps{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:9px;margin-bottom:12px}
+  .comp b{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;
+          letter-spacing:.06em;margin-bottom:3px}
+  .comp .track{height:4px;background:var(--panel-2);border-radius:2px;overflow:hidden}
+  .comp .track i{display:block;height:100%;background:var(--accent)}
+  .plan{display:flex;gap:22px;flex-wrap:wrap;font-family:var(--mono);font-size:12.5px;
+        border-top:1px solid var(--line);padding-top:11px}
+  .plan div b{display:block;font-size:10px;color:var(--muted);text-transform:uppercase;
+              letter-spacing:.06em;margin-bottom:2px}
+  .empty{color:var(--muted);text-align:center;padding:50px 20px}
+  .hint{color:var(--muted);font-size:12px;margin:14px 2px}
+  @media(max-width:820px){
+    .hide-s{display:none}
+    main{padding:10px}
+    thead th,tbody td{padding:8px 5px;font-size:11.5px}
+    .stats{width:100%;margin-left:0;gap:12px}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <span class="dot" id="dot"></span>
+    <h1>Scanner intraday</h1>
+    <div class="stats">
+      <div class="stat"><b>Aggiornato</b><span id="s-upd">—</span></div>
+      <div class="stat"><b>Universo</b><span id="s-uni">—</span></div>
+      <div class="stat"><b>Analizzati</b><span id="s-cand">—</span></div>
+      <div class="stat"><b>In lista</b><span id="s-opp">—</span></div>
+      <div class="stat"><b>BTC 4h</b><span id="s-btc">—</span></div>
+      <div class="stat"><b>Scan</b><span id="s-dur">—</span></div>
+    </div>
+  </div>
+  <nav>
+    <button class="on" data-tab="opps">Opportunità</button>
+    <button data-tab="signals">Segnali registrati</button>
+    <button data-tab="perf">Performance</button>
+  </nav>
+</header>
+
+<main>
+  <div id="banner" class="banner" style="display:none"></div>
+  <div id="view"></div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+let TAB = 'opps', OPEN = new Set(), LAST = null;
+
+const num = (v, d=2) => (v===null||v===undefined||Number.isNaN(v)) ? '—' : Number(v).toFixed(d);
+const pct = (v, d=2) => (v===null||v===undefined) ? '—' : (v*100).toFixed(d)+'%';
+const sgn = v => (v===null||v===undefined) ? 'mut' : (v>0 ? 'pos' : v<0 ? 'neg' : 'mut');
+const price = v => (v===null||v===undefined) ? '—' :
+  (Math.abs(v) >= 100 ? Number(v).toFixed(2) : Number(v).toPrecision(5));
+const ago = ts => {
+  if(!ts) return '—';
+  const s = Math.round((Date.now()-ts)/1000);
+  return s < 60 ? s+'s fa' : Math.round(s/60)+'m fa';
+};
+const scoreColor = s => s >= 72 ? 'var(--long)' : s >= 60 ? 'var(--accent)' : 'var(--muted)';
+
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('nav button').forEach(x => x.classList.toggle('on', x===b));
+  TAB = b.dataset.tab;
+  refresh();
+});
+
+function header(){
+  const d = LAST;
+  $('#s-upd').textContent  = ago(d && d.ts);
+  $('#s-uni').textContent  = d ? (d.universe ?? '—') : '—';
+  $('#s-cand').textContent = d ? (d.candidates ?? '—') : '—';
+  $('#s-opp').textContent  = d ? (d.opportunities||[]).length : '—';
+  $('#s-dur').textContent  = d && d.duration_s != null ? d.duration_s+'s' : '—';
+  const btc = $('#s-btc');
+  btc.textContent = d && d.btc_ret_4h != null ? pct(d.btc_ret_4h,1) : '—';
+  btc.className = d ? sgn(d.btc_ret_4h) : '';
+
+  const dot = $('#dot');
+  const stale = d && d.ts && (Date.now()-d.ts > 300000);
+  dot.className = 'dot' + (d && d.error_message ? ' err' : stale ? ' stale' : '');
+
+  const b = $('#banner');
+  if(d && d.error_message){
+    b.style.display = 'block';
+    b.textContent = 'Dati non disponibili: ' + d.error_message;
+  } else b.style.display = 'none';
+}
+
+function rowsOpps(list){
+  if(!list.length) return '<div class="empty">Nessun candidato sopra la soglia in questo momento.<br>' +
+    'Mercato piatto oppure soglia troppo alta: abbassa <code>min_display_score</code> in scanner_config.yaml.</div>';
+
+  const head = `<thead><tr>
+    <th class="l">#</th><th class="l">Simbolo</th><th class="l">Dir</th><th>Score</th>
+    <th>Prezzo</th><th>1h</th><th>4h</th><th class="hide-s">24h</th>
+    <th>RVOL</th><th class="hide-s">ATR%</th><th class="hide-s">vs BTC</th>
+    <th class="hide-s">OI 1h</th><th class="hide-s">Fund</th>
+    <th>Stop</th><th>Target</th><th class="hide-s">R:R</th></tr></thead>`;
+
+  const body = list.map((o,i) => {
+    const f = o.features || {}, p = o.plan || {};
+    const open = OPEN.has(o.symbol);
+    const main = `<tr class="row" data-sym="${o.symbol}">
+      <td class="l mut">${i+1}</td>
+      <td class="l"><span class="sym">${o.symbol.replace('USDT','')}</span><span class="mut">USDT</span></td>
+      <td class="l"><span class="badge ${o.direction}">${o.direction==='long'?'LONG':'SHORT'}</span></td>
+      <td><div class="scorewrap"><div class="scorebar"><i style="width:${Math.min(100,o.score)}%;background:${scoreColor(o.score)}"></i></div>
+          <span class="score" style="color:${scoreColor(o.score)}">${num(o.score,0)}</span></div></td>
+      <td>${price(o.price)}</td>
+      <td class="${sgn(f.ret_1h)}">${pct(f.ret_1h,1)}</td>
+      <td class="${sgn(f.ret_4h)}">${pct(f.ret_4h,1)}</td>
+      <td class="hide-s ${sgn(f.ret_24h)}">${pct(f.ret_24h,1)}</td>
+      <td class="${f.rvol_1h>=2?'hot':''}">${num(f.rvol_1h,1)}x</td>
+      <td class="hide-s">${pct(f.atr_pct_1h,2)}</td>
+      <td class="hide-s ${sgn(f.rs_btc_4h)}">${pct(f.rs_btc_4h,1)}</td>
+      <td class="hide-s ${sgn(f.oi_change_1h)}">${pct(f.oi_change_1h,1)}</td>
+      <td class="hide-s ${sgn(f.funding_rate)}">${f.funding_rate==null?'—':(f.funding_rate*100).toFixed(3)+'%'}</td>
+      <td>${price(p.stop)}</td>
+      <td>${price(p.target)}</td>
+      <td class="hide-s">${num(p.risk_reward,1)}</td></tr>`;
+
+    if(!open) return main;
+
+    const why = (o.reasons||[]).map(r =>
+      `<span class="${r.startsWith('Attenzione')?'w':''}">${r}</span>`).join('');
+    const comps = Object.entries(o.components||{}).map(([k,v]) =>
+      `<div class="comp"><b>${k.replace('_',' ')}</b>
+        <div class="track"><i style="width:${Math.round(v*100)}%"></i></div></div>`).join('');
+    const detail = `<tr class="detail"><td colspan="16">
+      <div class="why">${why || '<span class="mut">nessun motivo dominante</span>'}</div>
+      <div class="comps">${comps}</div>
+      <div class="plan">
+        <div><b>Entry</b>${price(p.entry)}</div>
+        <div><b>Stop</b>${price(p.stop)} <span class="mut">(${pct(p.risk_pct,2)})</span></div>
+        <div><b>Target</b>${price(p.target)}</div>
+        <div><b>R:R</b>${num(p.risk_reward,1)}</div>
+        <div><b>Invalidazione</b>${p.invalidation || '—'}</div>
+      </div></td></tr>`;
+    return main + detail;
+  }).join('');
+
+  return `<table>${head}<tbody>${body}</tbody></table>
+    <p class="hint">Tocca una riga per vedere perché è in lista e il piano completo.
+    Score ≥ ${(LAST&&LAST.config&&LAST.config.signal_score)||60} viene registrato per la verifica degli esiti.</p>`;
+}
+
+function rowsSignals(list){
+  if(!list.length) return '<div class="empty">Nessun segnale registrato finora.</div>';
+  const head = `<thead><tr><th class="l">Ora</th><th class="l">Simbolo</th><th class="l">Dir</th>
+    <th>Score</th><th>Entry</th><th>Stop</th><th>Target</th>
+    <th>Esito 1h</th><th>Ret 1h</th><th>Ret 4h</th></tr></thead>`;
+  const body = list.map(s => {
+    const when = new Date(s.ts).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+    const hit = s.hit_1h === 'target' ? '<span class="pos">target</span>'
+              : s.hit_1h === 'stop'   ? '<span class="neg">stop</span>'
+              : '<span class="mut">' + (s.hit_1h || 'in attesa') + '</span>';
+    return `<tr><td class="l mut">${when}</td>
+      <td class="l"><span class="sym">${s.symbol.replace('USDT','')}</span></td>
+      <td class="l"><span class="badge ${s.direction}">${s.direction==='long'?'LONG':'SHORT'}</span></td>
+      <td style="color:${scoreColor(s.score)}"><b>${num(s.score,0)}</b></td>
+      <td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td>
+      <td>${hit}</td>
+      <td class="${sgn(s.ret_1h)}">${pct(s.ret_1h,2)}</td>
+      <td class="${sgn(s.ret_4h)}">${pct(s.ret_4h,2)}</td></tr>`;
+  }).join('');
+  return `<table>${head}<tbody>${body}</tbody></table>`;
+}
+
+function rowsPerf(d){
+  const s = d.summary || {}, b = d.buckets || [];
+  const cards = `<div class="plan" style="border:0;margin-bottom:16px">
+      <div><b>Segnali totali</b>${s.signals_total ?? 0}</div>
+      <div><b>Verificati a 4h</b>${s.evaluated_4h ?? 0}</div>
+      <div><b>Win rate 4h</b>${s.win_rate_4h==null?'—':pct(s.win_rate_4h,1)}</div>
+      <div><b>Ret medio 4h</b><span class="${sgn(s.avg_ret_4h)}">${s.avg_ret_4h==null?'—':pct(s.avg_ret_4h,2)}</span></div>
+    </div>`;
+  if(!b.length) return cards + '<div class="empty">Servono segnali già maturati per la statistica.<br>' +
+    'La tabella si popola da sola man mano che i segnali raggiungono l\'orizzonte di 4h.</div>';
+
+  const head = `<thead><tr><th class="l">Fascia score</th><th>N</th><th>Win rate</th>
+    <th>Ret medio</th><th>MFE (R)</th><th>MAE (R)</th><th>Target</th><th>Stop</th></tr></thead>`;
+  const body = b.map(r => `<tr>
+      <td class="l"><b>${r.bucket}–${r.bucket+9}</b></td>
+      <td>${r.n}</td>
+      <td class="${r.win_rate>0.5?'pos':'neg'}">${pct(r.win_rate,1)}</td>
+      <td class="${sgn(r.avg_ret)}">${pct(r.avg_ret,2)}</td>
+      <td>${num(r.avg_mfe,2)}</td><td>${num(r.avg_mae,2)}</td>
+      <td class="pos">${pct(r.target_rate,0)}</td><td class="neg">${pct(r.stop_rate,0)}</td></tr>`).join('');
+  return cards + `<table>${head}<tbody>${body}</tbody></table>
+    <p class="hint">Se le fasce alte non battono le fasce basse, lo score non sta discriminando:
+    è il segnale che i pesi in <code>scanner_config.yaml</code> vanno rivisti.</p>`;
+}
+
+async function refresh(){
+  try{
+    if(TAB === 'opps'){
+      LAST = await (await fetch('/api/scan')).json();
+      header();
+      $('#view').innerHTML = rowsOpps(LAST.opportunities || []);
+      document.querySelectorAll('tr.row').forEach(tr => tr.onclick = () => {
+        const s = tr.dataset.sym;
+        OPEN.has(s) ? OPEN.delete(s) : OPEN.add(s);
+        $('#view').innerHTML = rowsOpps(LAST.opportunities || []);
+        refreshBind();
+      });
+    } else if(TAB === 'signals'){
+      $('#view').innerHTML = rowsSignals(await (await fetch('/api/signals')).json());
+    } else {
+      $('#view').innerHTML = rowsPerf(await (await fetch('/api/performance')).json());
+    }
+  }catch(e){
+    $('#dot').className = 'dot err';
+    $('#banner').style.display = 'block';
+    $('#banner').textContent = 'Dashboard non raggiunge lo scanner: ' + e.message;
+  }
+}
+function refreshBind(){
+  document.querySelectorAll('tr.row').forEach(tr => tr.onclick = () => {
+    const s = tr.dataset.sym;
+    OPEN.has(s) ? OPEN.delete(s) : OPEN.add(s);
+    $('#view').innerHTML = rowsOpps(LAST.opportunities || []);
+    refreshBind();
+  });
+}
+
+refresh();
+setInterval(refresh, 10000);
+setInterval(header, 1000);
+</script>
+</body>
+</html>

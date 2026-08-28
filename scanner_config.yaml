@@ -1,0 +1,67 @@
+# ---------------------------------------------------------------------------
+# Scanner opportunita' intraday (orizzonte 1-8h) sui perpetual USDT di Bybit
+# ---------------------------------------------------------------------------
+# Lo scanner NON invia ordini: produce una classifica di candidati con piano
+# operativo. Le decisioni restano tue.
+
+category: linear
+
+# --- Universo -------------------------------------------------------------
+# Filtro di liquidita': sotto questa soglia lo slippage si mangia il target.
+min_turnover_24h: 20000000     # 20 M USDT di controvalore nelle 24h
+max_spread_bp: 20              # spread bid/ask massimo accettato (basis point)
+
+# Simboli sempre analizzati, anche se poco mossi (utile per i tuoi preferiti).
+always_scan:
+  - BTCUSDT
+  - ETHUSDT
+  - SOLUSDT
+
+# Simboli da escludere sempre.
+exclude_symbols: []
+
+# --- Imbuto ---------------------------------------------------------------
+# Quanti candidati passano allo stadio 2 (candele + open interest).
+# Alzarlo aumenta la copertura e le chiamate API; 60 e' un buon compromesso.
+deep_scan_top: 60
+workers: 8                     # thread paralleli per lo stadio 2
+requests_per_second: 10        # limite verso Bybit (pubblico: c'e' margine)
+use_open_interest: true
+
+# --- Punteggio ------------------------------------------------------------
+min_display_score: 25          # sotto questo non compare in dashboard
+signal_score: 60               # sopra questo viene REGISTRATO come segnale
+alert_score: 72                # sopra questo parte la notifica Telegram
+cooldown_minutes: 120          # non riregistrare lo stesso simbolo/direzione
+
+# Pesi delle componenti (vengono normalizzati: non devono sommare esattamente a 1).
+# Rivedili DOPO aver guardato scanner/backtest.py e la tabella performance.
+weights:
+  volume: 0.24
+  breakout: 0.18
+  momentum: 0.16
+  rel_strength: 0.14
+  trend: 0.13
+  volatility: 0.08
+  open_interest: 0.07
+
+# --- Piano operativo ------------------------------------------------------
+stop_atr_mult: 1.5             # stop a 1.5 ATR(1h) dall'entry
+target_atr_mult: 3.0           # target a 3 ATR -> R:R 2
+
+# --- Esecuzione -----------------------------------------------------------
+scan_interval_seconds: 90
+tracker_interval_seconds: 300  # ogni quanto verificare gli esiti dei segnali
+db_path: scanner/data/scanner.db
+
+# --- Dashboard ------------------------------------------------------------
+host: 0.0.0.0                  # 0.0.0.0 la rende raggiungibile dall'iPhone in LAN
+port: 8787
+
+# --- Telegram (opzionale) -------------------------------------------------
+# Meglio usare le variabili d'ambiente TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID
+# invece di scrivere i segreti qui dentro.
+telegram:
+  enabled: false
+  bot_token: ""
+  chat_id: ""

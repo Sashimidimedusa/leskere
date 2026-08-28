@@ -1,3 +1,14 @@
+# Repo trading — Bybit
+
+Due strumenti distinti:
+
+| Cartella | Cosa fa |
+|---|---|
+| **[`scanner/`](scanner/README.md)** | **Scanner di opportunità intraday (1-8h)**: ordina tutto il mercato dei perpetual USDT per punteggio, con dashboard web, registro dei segnali e verifica automatica degli esiti. È lo strumento principale. |
+| `bot/` | Bot storico a segnale singolo: confluenza EMA su più time frame, documentato qui sotto. |
+
+---
+
 # EMA Multi-Timeframe Signal Bot (Bybit)
 
 Bot che genera **chiamate (segnali)** su asset cripto perpetual di **Bybit** pensati
