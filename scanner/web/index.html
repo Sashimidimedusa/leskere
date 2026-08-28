@@ -37,7 +37,10 @@
   .banner{background:#3a1d1d;border:1px solid #7f2d2d;color:#ffd9d9;
           padding:12px 14px;border-radius:9px;margin-bottom:14px;font-size:13px}
   table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12.5px}
-  thead th{position:sticky;top:0;background:var(--panel);color:var(--muted);text-align:right;
+  /* --hdr = altezza della barra in alto, misurata a runtime: senza questo
+     l'intestazione delle colonne scorrerebbe DIETRO l'header e sparirebbe. */
+  thead th{position:sticky;top:var(--hdr,0px);z-index:5;
+           background:var(--panel);color:var(--muted);text-align:right;
            font-weight:500;font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;
            padding:9px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
   thead th:first-child,thead th.l{text-align:left}
@@ -77,6 +80,19 @@
     main{padding:10px}
     thead th,tbody td{padding:8px 5px;font-size:11.5px}
     .stats{width:100%;margin-left:0;gap:12px}
+  }
+  /* iPhone: restano le colonne che servono a decidere se aprire la riga.
+     Il piano operativo completo e' nel dettaglio, a un tap di distanza. */
+  @media(max-width:560px){
+    .hide-xs{display:none}
+    main{padding:8px}
+    thead th,tbody td{padding:7px 4px;font-size:11px}
+    .sym{font-size:12.5px}
+    .scorebar{width:34px}
+    .comps{grid-template-columns:repeat(auto-fill,minmax(130px,1fr))}
+    .plan{gap:14px}
+    /* senza questo il contenuto del dettaglio allarga la tabella oltre lo schermo */
+    .detail td>div{max-width:calc(100vw - 26px)}
   }
 </style>
 </head>
@@ -156,10 +172,11 @@ function rowsOpps(list){
 
   const head = `<thead><tr>
     <th class="l">#</th><th class="l">Simbolo</th><th class="l">Dir</th><th>Score</th>
-    <th>Prezzo</th><th>1h</th><th>4h</th><th class="hide-s">24h</th>
+    <th>Prezzo</th><th>1h</th><th class="hide-xs">4h</th><th class="hide-s">24h</th>
     <th>RVOL</th><th class="hide-s">ATR%</th><th class="hide-s">vs BTC</th>
     <th class="hide-s">OI 1h</th><th class="hide-s">Fund</th>
-    <th>Stop</th><th>Target</th><th class="hide-s">R:R</th></tr></thead>`;
+    <th class="hide-xs">Stop</th><th class="hide-xs">Target</th>
+    <th class="hide-s">R:R</th></tr></thead>`;
 
   const body = list.map((o,i) => {
     const f = o.features || {}, p = o.plan || {};
@@ -172,15 +189,15 @@ function rowsOpps(list){
           <span class="score" style="color:${scoreColor(o.score)}">${num(o.score,0)}</span></div></td>
       <td>${price(o.price)}</td>
       <td class="${sgn(f.ret_1h)}">${pct(f.ret_1h,1)}</td>
-      <td class="${sgn(f.ret_4h)}">${pct(f.ret_4h,1)}</td>
+      <td class="hide-xs ${sgn(f.ret_4h)}">${pct(f.ret_4h,1)}</td>
       <td class="hide-s ${sgn(f.ret_24h)}">${pct(f.ret_24h,1)}</td>
       <td class="${f.rvol_1h>=2?'hot':''}">${num(f.rvol_1h,1)}x</td>
       <td class="hide-s">${pct(f.atr_pct_1h,2)}</td>
       <td class="hide-s ${sgn(f.rs_btc_4h)}">${pct(f.rs_btc_4h,1)}</td>
       <td class="hide-s ${sgn(f.oi_change_1h)}">${pct(f.oi_change_1h,1)}</td>
       <td class="hide-s ${sgn(f.funding_rate)}">${f.funding_rate==null?'—':(f.funding_rate*100).toFixed(3)+'%'}</td>
-      <td>${price(p.stop)}</td>
-      <td>${price(p.target)}</td>
+      <td class="hide-xs">${price(p.stop)}</td>
+      <td class="hide-xs">${price(p.target)}</td>
       <td class="hide-s">${num(p.risk_reward,1)}</td></tr>`;
 
     if(!open) return main;
@@ -211,7 +228,8 @@ function rowsOpps(list){
 function rowsSignals(list){
   if(!list.length) return '<div class="empty">Nessun segnale registrato finora.</div>';
   const head = `<thead><tr><th class="l">Ora</th><th class="l">Simbolo</th><th class="l">Dir</th>
-    <th>Score</th><th>Entry</th><th>Stop</th><th>Target</th>
+    <th>Score</th><th class="hide-xs">Entry</th><th class="hide-s">Stop</th>
+    <th class="hide-s">Target</th>
     <th>Esito 1h</th><th>Ret 1h</th><th>Ret 4h</th></tr></thead>`;
   const body = list.map(s => {
     const when = new Date(s.ts).toLocaleString('it-IT',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
@@ -222,7 +240,8 @@ function rowsSignals(list){
       <td class="l"><span class="sym">${s.symbol.replace('USDT','')}</span></td>
       <td class="l"><span class="badge ${s.direction}">${s.direction==='long'?'LONG':'SHORT'}</span></td>
       <td style="color:${scoreColor(s.score)}"><b>${num(s.score,0)}</b></td>
-      <td>${price(s.entry)}</td><td>${price(s.stop)}</td><td>${price(s.target)}</td>
+      <td class="hide-xs">${price(s.entry)}</td>
+      <td class="hide-s">${price(s.stop)}</td><td class="hide-s">${price(s.target)}</td>
       <td>${hit}</td>
       <td class="${sgn(s.ret_1h)}">${pct(s.ret_1h,2)}</td>
       <td class="${sgn(s.ret_4h)}">${pct(s.ret_4h,2)}</td></tr>`;
@@ -242,13 +261,15 @@ function rowsPerf(d){
     'La tabella si popola da sola man mano che i segnali raggiungono l\'orizzonte di 4h.</div>';
 
   const head = `<thead><tr><th class="l">Fascia score</th><th>N</th><th>Win rate</th>
-    <th>Ret medio</th><th>MFE (R)</th><th>MAE (R)</th><th>Target</th><th>Stop</th></tr></thead>`;
+    <th>Ret medio</th><th class="hide-xs">MFE (R)</th><th class="hide-xs">MAE (R)</th>
+    <th>Target</th><th>Stop</th></tr></thead>`;
   const body = b.map(r => `<tr>
       <td class="l"><b>${r.bucket}–${r.bucket+9}</b></td>
       <td>${r.n}</td>
       <td class="${r.win_rate>0.5?'pos':'neg'}">${pct(r.win_rate,1)}</td>
       <td class="${sgn(r.avg_ret)}">${pct(r.avg_ret,2)}</td>
-      <td>${num(r.avg_mfe,2)}</td><td>${num(r.avg_mae,2)}</td>
+      <td class="hide-xs">${num(r.avg_mfe,2)}</td>
+      <td class="hide-xs">${num(r.avg_mae,2)}</td>
       <td class="pos">${pct(r.target_rate,0)}</td><td class="neg">${pct(r.stop_rate,0)}</td></tr>`).join('');
   return cards + `<table>${head}<tbody>${body}</tbody></table>
     <p class="hint">Se le fasce alte non battono le fasce basse, lo score non sta discriminando:
@@ -286,6 +307,14 @@ function refreshBind(){
     refreshBind();
   });
 }
+
+function syncHeaderOffset(){
+  const h = document.querySelector('header');
+  if(h) document.documentElement.style.setProperty('--hdr', h.offsetHeight + 'px');
+}
+syncHeaderOffset();
+addEventListener('resize', syncHeaderOffset);
+addEventListener('orientationchange', syncHeaderOffset);
 
 refresh();
 setInterval(refresh, 10000);
